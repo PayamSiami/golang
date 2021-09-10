@@ -13,7 +13,23 @@ import (
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("List users"))
+	db, err := database.Connect()
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	repo := crud.NewRepositoryUsersCRUD(db)
+
+	func(userRepository repository.UserRepository) {
+		users, err := userRepository.FindAll()
+		if err != nil {
+			responses.ERROR(w, http.StatusInternalServerError, err)
+			return
+		}
+		responses.JSON(w, http.StatusOK, users)
+	}(repo)
+
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
