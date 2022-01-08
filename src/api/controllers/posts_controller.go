@@ -7,9 +7,15 @@ import (
 	"api/repository/crud"
 	"api/responses"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
+
+	"api/auth"
+
+	"github.com/gorilla/mux"
 )
 
 func CreatePost(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +38,19 @@ func CreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid, err := auth.ExtractTokenID(r)
+	if err != nil {
+		responses.ERROR(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	if uid != post.AuthorID {
+		fmt.Println("ada", uid)
+		fmt.Println("post.AuthorID ", post.AuthorID)
+		responses.ERROR(w, http.StatusUnauthorized, errors.New(http.StatusText(http.StatusUnauthorized)))
+		return
+	}
+
 	db, err := database.Connect()
 	if err != nil {
 		responses.ERROR(w, http.StatusInternalServerError, err)
@@ -46,7 +65,7 @@ func CreatePost(w http.ResponseWriter, r *http.Request) {
 			responses.ERROR(w, http.StatusInternalServerError, err)
 			return
 		}
-		w.Header().Set("Location", fmt.Sprintf("%s%s/%d", r.Host, r.RequestURI, post.ID))
+		w.Header().Set("Location", fmt.Sprintf("%s%s/%d", r.Host, r.URL.Path, post.ID))
 		responses.JSON(w, http.StatusCreated, post)
 	}(repo)
 }
@@ -66,18 +85,123 @@ func GetPosts(w http.ResponseWriter, r *http.Request) {
 			responses.ERROR(w, http.StatusUnprocessableEntity, err)
 			return
 		}
-		responses.JSON(w, http.StatusCreated, posts)
+		responses.JSON(w, http.StatusOK, posts)
+	}(repo)
+}
+
+func GetPost(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	pid, err := strconv.ParseUint(vars["pid"], 10, 64)
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	db, err := database.Connect()
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	repo := crud.NewRepositoryPostCRUD(db)
+
+	func(postRepository repository.PostRepository) {
+		post, err := postRepository.FindById(pid)
+		if err != nil {
+			responses.ERROR(w, http.StatusBadRequest, err)
+			return
+		}
+		responses.JSON(w, http.StatusOK, post)
 	}(repo)
 }
 
 func UpdatePost(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Update Post")
-}
 
-func GetPost(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Get an Post")
-}
+	vars := mux.Vars(r)
+	pid, err := strconv.ParseUint(vars["id"], 10, 64)
+	if err != nil {
+		responses.ERROR(w, http.StatusBadRequest, err)
+		return
+	}
 
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		responses.ERROR(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	post := models.Post{}
+	err = json.Unmarshal(body, &post)
+	if err != nil {
+		responses.ERROR(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	post.Prepare()
+	err = post.Validate()
+	if err != nil {
+		responses.ERROR(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	uid, err := auth.ExtractTokenID(r)
+	if err != nil {
+		responses.ERROR(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	if uid != post.AuthorID {
+		responses.ERROR(w, http.StatusUnauthorized, errors.New(http.StatusText(http.StatusUnauthorized)))
+		return
+	}
+
+	db, err := database.Connect()
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	repo := crud.NewRepositoryPostCRUD(db)
+
+	func(postRepository repository.PostRepository) {
+		post, err := postRepository.Update(pid, post)
+		if err != nil {
+			responses.ERROR(w, http.StatusBadRequest, err)
+			return
+		}
+		responses.JSON(w, http.StatusOK, post)
+	}(repo)
+}
 func DeletePost(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("delete Post")
+
+	vars := mux.Vars(r)
+	pid, err := strconv.ParseUint(vars["pid"], 10, 64)
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	uid, err := auth.ExtractTokenID(r)
+	if err != nil {
+		responses.ERROR(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	db, err := database.Connect()
+	if err != nil {
+		responses.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	repo := crud.NewRepositoryPostCRUD(db)
+
+	func(postRepository repository.PostRepository) {
+		_, err := postRepository.Delete(pid, uid)
+		if err != nil {
+			responses.ERROR(w, http.StatusBadRequest, err)
+			return
+		}
+		w.Header().Set("Entity", fmt.Sprintf("%d", pid))
+		responses.JSON(w, http.StatusNoContent, "")
+	}(repo)
 }
